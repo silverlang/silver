@@ -14,6 +14,7 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
     implementation(project(":compiler-api"))
+    implementation("io.arrow-kt:arrow-core:1.0.1")
 }
 
 tasks.test {
