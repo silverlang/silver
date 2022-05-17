@@ -113,22 +113,15 @@ sealed class TokenizerAction<T>{
     }
 
     class TokenizerOn(
-        val onCallback: TokenizerAction<*>,
-        val predicate: TokenizerAction<*>.()->TokenizerAction<*>
+        val predicate: (Char)->Boolean,
+        val action: TokenizerAction<*>.()->TokenizerAction<*>
     ): TokenizerAction<Tokenizer>() {
         override fun run(tokenizer: Tokenizer): ActionResult.TokenizerResult {
-            val result = when (val onCallbackResult = onCallback.run(tokenizer)) {
-                is ActionResult.TokenizerResult -> when (val value = onCallbackResult.either) {
-                    is Either.Left -> return onCallbackResult
-                    is Either.Right -> value.value
-                }
-                else -> return TokenizerResultBuilder.eof()
+            return if(tokenizer.currChar.exists(predicate)){
+                action().run(tokenizer) as ActionResult.TokenizerResult
+            }else{
+                TokenizerResultBuilder.failure("Current char failed callback check", tokenizer.currPosRange.getOrElse { TokenPositionRange.default })
             }
-            val predResult = when (result) {
-                is Some -> predicate().run(result.value.value)
-                is None -> return TokenizerResultBuilder.eof()
-            }
-            return predResult as ActionResult.TokenizerResult
         }
     }
 
@@ -185,7 +178,7 @@ sealed class TokenizerAction<T>{
                     }
                 }
             }
-            val new = tokenizer.addToken(token)
+            val new = result.addToken(token)
             return TokenizerResultBuilder.success(new)
         }
     }
@@ -193,13 +186,17 @@ sealed class TokenizerAction<T>{
     data class TokenizerUntil(private val subject: TokenizerAction<*>, private val bound: TokenizerAction<*>): TokenizerAction<Tokenizer>(){
         override fun run(tokenizer: Tokenizer): ActionResult<*> {
             var tok = tokenizer
+            var changed = false
             while(!this.bound.run(tok).either.exists { it.isDefined() }){
                 when(val result = this.subject.run(tok)){
                     is ActionResult.TokenizerResult ->
                         when(val either = result.either){
                             is Either.Right ->
                                 when(val op = either.value){
-                                    is Some -> tok = op.value.value
+                                    is Some -> {
+                                        tok = op.value.value
+                                        changed = true
+                                    }
                                     else -> break
                                 }
                             is Either.Left -> return TokenizerResultBuilder.failure(either.value.first, either.value.second)
@@ -207,7 +204,29 @@ sealed class TokenizerAction<T>{
                     else -> return result
                 }
             }
-            return TokenizerResultBuilder.success(tok)
+            return if(changed){
+                TokenizerResultBuilder.success(tok)
+            }else{
+                TokenizerResultBuilder.failure("Nothing changed", tok.currPosRange.getOrElse { TokenPositionRange.default })
+            }
+        }
+
+    }
+
+    data class TokenizerPeek(
+        val char: Char,
+        val callback: () -> TokenizerAction<*>
+    ): TokenizerAction<Tokenizer>(){
+        override fun run(tokenizer: Tokenizer): ActionResult<*> {
+            return if (tokenizer.peek { it == char }) {
+                TokenizerResultBuilder.success(tokenizer)
+            } else {
+                val pos = when (val pos = tokenizer.currPosRange) {
+                    is Some -> pos.value
+                    is None -> return TokenizerResultBuilder.eof()
+                }
+                TokenizerResultBuilder.failure("Peek char does not match $char", pos)
+            }
         }
 
     }
@@ -252,17 +271,22 @@ class TokenizerBuilder private constructor() {
         { _, ch -> "Current char is not a letter: $ch" }
     )
 
-    val whitespace = TokenizerAction.BaseAction.TokenizerPredicatedAction.TokenizerCharPredicate(
-        {
-            it.isWhitespace()
-        },
-        { _, ch -> "Current char is not a whitespace: $ch" }
-    )
+    val whitespace: (Char)->Boolean = { it.isWhitespace() }
 
-    val punct = TokenizerAction.BaseAction.TokenizerPredicatedAction.TokenizerCharPredicate(
+    val isPunct = TokenizerAction.BaseAction.TokenizerPredicatedAction.TokenizerCharPredicate(
         { Pattern.matches("\\p{Punct}", it.toString()) },
         { _, ch -> "Current char is not a punctuation: $ch" }
     )
+
+    val punct =
+        TokenizerAction.TokenProducer {
+            val range = it.currPosRange.getOrElse { TokenPositionRange.default }
+            if(Pattern.matches("\\p{Punct}", it.buffer)){
+                TokenizerAction.TokenResultBuilder.success(Token(range, TokenValue.TokenChar(it.buffer[0])))
+            }else{
+                TokenizerAction.TokenResultBuilder.failure("Expected punct but did not find it", range)
+            }
+        }
 
     val int = TokenizerAction.TokenProducer {
         val range = when(val range = it.currPosRange){
@@ -285,7 +309,7 @@ class TokenizerBuilder private constructor() {
     }
 
     val eof: TokenizerAction<*> get() = TokenizerAction.BaseAction.BasicAction {
-        if(it.currPos.isEmpty() && it.currChar.isEmpty())
+        if(it.currChar.isEmpty())
             success(it)
         else {
             val range = when (val range = it.currPosRange) {
@@ -308,11 +332,14 @@ class TokenizerBuilder private constructor() {
             { _, c -> "Current char $c does not match pattern $pattern" }
         )
 
-    fun on(action: TokenizerAction<*>, predicate: TokenizerAction<*>.()->TokenizerAction<*>) =
-        TokenizerAction.TokenizerOn(action, predicate)
+    fun on(predicate: (Char)->Boolean, action: TokenizerAction<*>.()->TokenizerAction<*>) =
+        TokenizerAction.TokenizerOn(predicate, action)
 
     fun produce(token: TokenizerAction.TokenProducer, producer: ()->TokenizerAction<*>) =
         TokenizerAction.TokenizerProducer(token, producer)
+
+    fun peek(char: Char, callback: () -> TokenizerAction<*>) =
+        TokenizerAction.TokenizerPeek(char, callback)
 
     companion object{
         fun build(compiler: SilverCompiler, callback: TokenizerBuilder.()->TokenizerAction<*>): TokenizerRunner{

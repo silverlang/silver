@@ -13,16 +13,17 @@ fun main(args: Array<String>) = runBlocking{
         //Whitespace
         val ws = on(whitespace){
             val sk = skip
-            println("Skipping whitespace")
             sk
         }
         //Newline
         val nl = char('\n') { skip then newline }
+        //terminator
+        val term = ws or nl or eof
         //Underscore
         val underscore = pattern("_")
         val identStart = letter or (underscore then letter)
         val identBody = letter or digit
-        val end = whitespace or punct
+        val end = isPunct or term
         //Ident tokens
         val ident = produce(ident) {
             val ident = identStart then (identBody until end)
@@ -34,9 +35,14 @@ fun main(args: Array<String>) = runBlocking{
             int
         }
 
-        val all = (ident or int) then (ws or nl or eof)
+        val punctTok = produce(punct){
+            isPunct
+        }
 
-        all until eof
+        //All tokens
+        val all = (ident or int or punctTok)
+
+        (all or ws) until eof
     }
     launch{
         val tokens = when(val result = tokenizer.run()){
@@ -48,7 +54,7 @@ fun main(args: Array<String>) = runBlocking{
             is Either.Right -> result.value
         }
         for(token in tokens){
-            println(tokens)
+            println(token)
         }
     }
 }

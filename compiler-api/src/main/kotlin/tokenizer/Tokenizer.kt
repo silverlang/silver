@@ -94,13 +94,12 @@ data class Tokenizer(
     private val option: Option<ActionValue.TokenizerValue> = if(currChar.isDefined()) this.toValue().some() else none()
 
     init{
-        println("New tokenizer: $this")
+//        println("New tokenizer: $this")
     }
     fun next() =
         Tokenizer(
             this.compiler,
             this.currPos.map { it.nextCol() },
-            buffer = this.buffer,
             tokens = this.tokens
         ).option
 
@@ -109,10 +108,9 @@ data class Tokenizer(
             this.compiler,
             this.currPos.map { it.nextLine() },
             buffer = this.buffer
-
         ).option
 
-    fun peek(callback: (Option<Char>)->Boolean): Boolean = callback(this.peekChar)
+    fun peek(callback: (Char)->Boolean): Boolean = this.peekChar.exists(callback)
 
     internal fun addToken(token: Token): Tokenizer =
         Tokenizer(
@@ -126,6 +124,7 @@ data class Tokenizer(
         Tokenizer(
             compiler,
             currPos.map { it.nextCol() },
+            this.currPosRange.map { it.start..it.end.nextCol() },
             buffer = when(currChar){
                 is Some -> buffer + currChar.value
                 is None -> ""
