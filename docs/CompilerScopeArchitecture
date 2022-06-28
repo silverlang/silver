@@ -1,0 +1,229 @@
+
+
+
+
+Compiler -> Jobs -> JobN (FileN) -> Tokenizer -> Parser -> Symbol Resolution -> IR Lowering -> Semantic Analysis and Tranformation -> MCLowering -> Output
+
+
+
+                                       -> createSourceFile(path) -> SourceFile
+Compiler -> newJob -> CompilerJobScope -> startTokenizer -> TokenizerScope -> Tokenizer impl here
+                                       -> startParser -> ParserScope -> Parser impl here
+                                       -> startN -> NScope -> N impl here
+
+
+fun main(args: Array<String>){
+    val compiler = Compiler {
+        //Here we can customize what args are recognized by extension
+        //This requires one to return with a CLIArg<T>
+        loadArgs(args){
+            //CLIArgsScope has key: String, value: String, and pos: Int as properties
+            when(key){
+                "srcDir" -> {
+                    value.toPath { path ->
+                        display{
+                            cliError{
+                                pos = pos
+                                message = "srcDir $value does not exist"
+                            }
+                            note{
+                                pos = pos
+                                message = "Tried path: $path"
+                            }
+                        }
+                        shutdown()
+                    }.toArg()
+                }
+            }
+        }
+        val mainFile = getArg {
+            it.kind == "sourceFile"
+        }.orElse{
+            display{
+                error{
+                    message = "No main file specified"
+                    code = ErrorCode.NoFileSpecified
+                }
+            }
+            shutdown()
+        }
+        val tokenizer = createTokenizer(mainFile.canonName) {
+            enable(indent, 4)
+
+            token(TokenKind.Word){
+                expect(alpha) until !alpha
+            }
+            token(TokenKind.Ident) {
+                //valid idents:
+                //  person
+                //  person2
+                //  x1, y1, x2, y2
+                //  _person
+                //  _x1, _y1
+                val start = expect(alpha or ('_' then alpha))
+                val body = expect alphanum until
+                start then body
+            }
+            token(TokenKind.Decimal){
+                val int = expect digit until !digit
+                int then '.' then int
+            }
+            token(TokenKind.Int){
+                expect digit until !digit
+            }
+            token(TokenKind.Punct){
+                expect(punct)
+            }
+        }
+        val parser = createParser(mainFile.canonFile){
+            rule("variable"){
+                expect(TokenKind.Word) `where` { it.data == "var" } then {
+                    saveToken("word")
+                    expect(TokenKind.Ident) then {
+                        saveToken("ident")
+
+                        /*Sugar for:
+                        *   if(currentToken.type == TokenKind.Punct){
+                        *       if(currentToken.data == ':'){
+                        *           expect(TokenKind.Ident)
+                        *           saveToken("type")
+                        *       }
+                        *   ...rest of code below...
+                        */
+                        `if`(TokenKind.Punct) `where` { it.data == ':' } then {
+                            expect(TokenKind.Ident)
+                            saveToken("type")
+                        } then {
+                            expect(TokenKind.Punct) `where` { it.data == '=' } then {
+                                goto("expression") then {
+                                    addNode{
+                                        val startTk = loadToken("word")
+                                        val identTk = loadToken("ident")
+                                        val typeTk = Option.fromNullable(loadToken("type"))
+                                        val exprNode = loadNode("expr")
+                                        ASTNode.ASTStatement.ASTVar(
+                                            ident = identTk.mapNotNull { ASTNode.ASTIdent(it.value, it.range) }
+                                            type = if(typeTk.isNotEmpty()) typeTk.map{ ASTNode.ASTType(it.value, it.range) } else none()
+                                            expr = exprNode
+                                            range = startTk.zip(exprNode).map{ (start, end) -> start.range .. end.range }
+                                        )
+                                    }
+                                }
+                            }
+                        } orElse {
+                            display {
+                                error{
+
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+            rule("expression") {
+                //This will allow us to try to use another parse rule as a child rule
+                `try`("integer") or `try`("string") else {
+                    display{
+                        error{
+                            range = token.range
+                            message = "Expected expression"
+                        }
+                    }
+                }
+            }
+            rule("integer"){
+                expect(TokenKind.Integer) then {
+                    saveNode("expr", ASTNode.ASTExpr.ASTInteger(token.map { it.value }, token.map { it.range })
+                }
+            }
+            rule("string"){
+                expect(TokenKind.Punct) `where` { it.data == '"' } then {
+                    saveToken("start")
+                    expect(any) until '"' then {
+                        saveToken("end")
+                        saveNode {
+                            val start = getToken("start")
+                            val end = getToken("end")
+                            ASTNode.ASTExpr.ASTStringLit(
+                                data = buffer
+                                range = start.zip(end).map { (start, end) -> start.range .. end.range }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val symTable = createSymbolTable(mainFile.canonName)
+        val symbolDeclAnalyzer = createASTVisitor(mainFile.canonName){
+            //Called when we enter a file
+            onFuncEnter { func ->
+                symTable.addFunctionSymbol {
+                    name = func.canonName
+                    range = func.range
+                }
+                symTable.startBlock(func.canonName)
+            }
+            onFuncExit{ func ->
+                symTable.endContext(func.canonName)
+            }
+            onVarEnter { var ->
+                symTable.addVarSymbol {
+                    name = var.canonName
+                    range = var.range
+                }
+            }
+        }
+        val symbolRefAnalyzer = createASTVisitor(mainFile.canonName){
+            onFuncEnter{ func ->
+                symTable.queryFunction(func.canonName){
+                    display{
+                        error{
+                            range = func.range
+                            message = "No such function ${func.canonName.name}"
+                        }
+                    }
+                    shutdown()
+                }
+                symTable.enterBlock(func.canonName)
+            }
+            onFuncExit{ func ->
+                symTable.exitBlock(func.canonName)
+            }
+            onVarEnter{ var ->
+                symTable.queryVar(var.canonName){
+                    display{
+                        error{
+                            range = var.range
+                            message = "No such function ${func.canonName.name}"
+                        }
+                    }
+                    shutdown()
+                }
+            }
+        }
+        val typeMap = createTypeMap(
+        val typeChecker = createASTVisitor(mainFile.canonName){
+            onFuncEnter{ func ->
+                val sig = typeMap.createFuncSignature{
+                    arity = func.params.length
+                    args = func.params.map{ param ->
+                        typeMap.getType(param.type.canonName) orElse {
+                            display{
+                                error{
+                                    message = "No such type ${param.type.name}"
+                                    range = param.type.range
+                                }
+                            }
+                            shutdown()
+                        }
+                    }
+                }
+            }
+        }
+        newJob {
+            createSourceFile(mainFile)
+            setPasses(tokenizer, parser, symbolDeclAnalyzer, symbolRefAnalyzer, typeChecker)
+        }
+    }
+}

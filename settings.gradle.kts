@@ -1,2 +1,4 @@
 rootProject.name = "silver"
-include("compiler-api")
+include("core")
+include("api")
+

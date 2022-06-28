@@ -11,10 +11,13 @@ repositories {
     mavenCentral()
 }
 
+
 dependencies {
     testImplementation(kotlin("test"))
-    implementation(project(":compiler-api"))
-    implementation("io.arrow-kt:arrow-core:1.0.1")
+    implementation(project(":api"))
+    implementation("io.arrow-kt:arrow-core:1.1.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.2")
+
 }
 
 tasks.test {
