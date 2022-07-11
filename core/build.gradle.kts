@@ -1,11 +1,10 @@
 plugins {
     kotlin("jvm")
+    kotlin("plugin.serialization") version "1.6.21"
 }
 
 group = "couch.silver.api"
 version = "0.0.1"
-
-val knbtVersion = "0.11.1"
 
 repositories {
     mavenCentral()
@@ -15,8 +14,11 @@ dependencies {
     testImplementation(kotlin("test"))
     implementation("io.arrow-kt:arrow-core:1.1.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.2")
-    implementation("net.benwoodworth.knbt:knbt:$knbtVersion")
+    api("org.jetbrains.kotlinx:kotlinx-serialization-core:1.3.0")
+    api("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.3.0")
     implementation(kotlin("script-runtime"))
+    implementation("io.github.microutils:kotlin-logging-jvm:2.1.20")
+    implementation("com.squareup.okio:okio:3.2.0")
 }
 
 tasks.test {

@@ -4,7 +4,7 @@ import project.canon.CanonicalName
 import project.files.FileData
 import java.nio.file.Path
 
-sealed class ModuleData(
+abstract class ModuleData(
     val canonName: CanonicalName,
     val path: Path,
     val children: List<ModuleData>,

@@ -26,31 +26,33 @@ sealed class File(
     val path: Path,
     val project: Project
 ){
-    abstract class ReadableFile(
+    abstract class ReadableFile<I>(
         canonName: CanonicalName,
         path: Path,
         project: Project
     ): File(canonName, path, project){
+        abstract val input: Option<I>
+
         class SourceFile(
             canonName: CanonicalName,
             path: Path,
             project: Project
-        ): ReadableFile(canonName, path, project){
+        ): ReadableFile<String>(canonName, path, project){
             override fun toData(): FileData.SourceFileData =
                 FileData.SourceFileData(
                     canonName, path, input
                 )
 
+            override val input: Option<String>
+                get() =
+                    try{
+                        path.bufferedReader().use { reader ->
+                            reader.readText()
+                        }.some()
+                    }catch(e: Exception){
+                        none()
+                    }
         }
-        val input: Option<String>
-            get() =
-                try{
-                    path.bufferedReader().use { reader ->
-                        reader.readText()
-                    }.some()
-                }catch(e: Exception){
-                    none()
-                }
     }
 
     /**
@@ -88,11 +90,6 @@ sealed class File(
          * @see Module.TargetModule
          */
         abstract fun dump()
-
-        protected abstract fun toTargetData(): FileData.TargetFileData
-
-        override fun toData(): FileData.TargetFileData =
-            toTargetData()
 
         fun finish(){
             if(path.notExists()){

@@ -65,10 +65,6 @@ sealed class Module(
     ){
         abstract fun dump()
 
-        protected abstract fun toTargetData(): ModuleData.TargetModuleData
-
-        override fun toData(): ModuleData.TargetModuleData = toTargetData()
-
         fun finish(){
             if(path.notExists()){
                 path.createDirectories()
